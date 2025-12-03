@@ -4,7 +4,8 @@
 # ============================================
 
 .PHONY: help build up down logs shell ssl-init ssl-renew clean status restart scale \
-        dev-build dev-up dev-down dev-logs dev-status dev-restart dev-clean dev-test
+        dev-build dev-up dev-down dev-logs dev-status dev-restart dev-clean dev-test \
+        upgrade upgrade-check upgrade-docling upgrade-dev rollback
 
 # Default target
 help:
@@ -45,6 +46,11 @@ help:
 	@echo "║    make shell-worker  - Shell into worker container          ║"
 	@echo "║    make clean         - Remove all containers and volumes    ║"
 	@echo "║    make prune         - Clean up Docker system               ║"
+	@echo "║                                                              ║"
+	@echo "║  🔄 UPGRADES:                                                 ║"
+	@echo "║    make upgrade       - Upgrade all dependencies             ║"
+	@echo "║    make upgrade-check - Check for available updates          ║"
+	@echo "║    make upgrade-docling - Upgrade Docling only               ║"
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 
 # Configuration
@@ -135,7 +141,8 @@ ssl-renew:
 
 build:
 	@echo "🔨 Building Docker images..."
-	@$(COMPOSE) build
+	@$(COMPOSE) build api
+	@echo "✅ Image built: docling-api:latest (used by api, worker, flower)"
 
 up:
 	@echo "🚀 Starting services..."
@@ -349,3 +356,98 @@ api: logs-api
 
 # View worker logs
 worker: logs-worker
+
+# ============================================
+# Upgrade Commands
+# ============================================
+
+upgrade-check:
+	@echo "🔍 Checking for available updates..."
+	@echo ""
+	@echo "📦 Current versions:"
+	@grep -E "^(docling|docling-core|easyocr|celery|fastapi|flower)" app/requirements.txt || true
+	@echo ""
+	@echo "📡 Latest versions on PyPI:"
+	@echo -n "  docling: " && curl -s https://pypi.org/pypi/docling/json | jq -r '.info.version' 2>/dev/null || echo "unknown"
+	@echo -n "  docling-core: " && curl -s https://pypi.org/pypi/docling-core/json | jq -r '.info.version' 2>/dev/null || echo "unknown"
+	@echo -n "  fastapi: " && curl -s https://pypi.org/pypi/fastapi/json | jq -r '.info.version' 2>/dev/null || echo "unknown"
+	@echo -n "  celery: " && curl -s https://pypi.org/pypi/celery/json | jq -r '.info.version' 2>/dev/null || echo "unknown"
+	@echo ""
+	@echo "💡 Run 'make upgrade' to upgrade all dependencies"
+	@echo "💡 Run 'make upgrade-docling' to upgrade Docling only"
+
+upgrade-docling:
+	@echo "⬆️  Upgrading Docling..."
+	@echo ""
+	@echo "1️⃣  Fetching latest Docling version..."
+	@LATEST=$$(curl -s https://pypi.org/pypi/docling/json | jq -r '.info.version') && \
+	echo "   Latest version: $$LATEST" && \
+	sed -i.bak "s/^docling>=.*/docling>=$$LATEST/" app/requirements.txt && \
+	rm -f app/requirements.txt.bak && \
+	echo "   Updated requirements.txt"
+	@echo ""
+	@echo "2️⃣  Rebuilding Docker images..."
+	@$(COMPOSE) build --no-cache api
+	@echo ""
+	@echo "3️⃣  Restarting services..."
+	@$(COMPOSE) up -d api worker
+	@echo ""
+	@echo "✅ Docling upgraded successfully!"
+	@echo ""
+	@echo "💡 Check logs with: make logs"
+	@echo "💡 Test with: make test-api"
+
+upgrade:
+	@echo "⬆️  Upgrading all dependencies..."
+	@echo ""
+	@echo "1️⃣  Updating requirements.txt with latest versions..."
+	@# Update Docling
+	@DOCLING_VER=$$(curl -s https://pypi.org/pypi/docling/json | jq -r '.info.version') && \
+	sed -i.bak "s/^docling>=.*/docling>=$$DOCLING_VER/" app/requirements.txt
+	@# Update docling-core
+	@DOCLING_CORE_VER=$$(curl -s https://pypi.org/pypi/docling-core/json | jq -r '.info.version') && \
+	sed -i.bak "s/^docling-core>=.*/docling-core>=$$DOCLING_CORE_VER/" app/requirements.txt
+	@# Update FastAPI
+	@FASTAPI_VER=$$(curl -s https://pypi.org/pypi/fastapi/json | jq -r '.info.version') && \
+	sed -i.bak "s/^fastapi>=.*/fastapi>=$$FASTAPI_VER/" app/requirements.txt
+	@# Update Celery
+	@CELERY_VER=$$(curl -s https://pypi.org/pypi/celery/json | jq -r '.info.version') && \
+	sed -i.bak "s/^celery\[redis\]>=.*/celery[redis]>=$$CELERY_VER/" app/requirements.txt
+	@# Cleanup backup files
+	@rm -f app/requirements.txt.bak
+	@echo "   ✅ requirements.txt updated"
+	@echo ""
+	@echo "2️⃣  Pulling latest base images..."
+	@docker pull python:3.12-slim
+	@docker pull redis:7-alpine
+	@docker pull nginx:1.27-alpine
+	@echo ""
+	@echo "3️⃣  Rebuilding Docker images (this may take a while)..."
+	@$(COMPOSE) build --no-cache api
+	@echo ""
+	@echo "4️⃣  Restarting services..."
+	@$(COMPOSE) up -d
+	@echo ""
+	@echo "✅ All dependencies upgraded successfully!"
+	@echo ""
+	@echo "📋 Post-upgrade checklist:"
+	@echo "   1. Check logs: make logs"
+	@echo "   2. Test API: make test-api"
+	@echo "   3. Test conversion: make test-convert"
+	@echo ""
+	@echo "⚠️  If issues occur, restore from backup:"
+	@echo "   git checkout app/requirements.txt"
+	@echo "   make build && make up"
+
+upgrade-dev:
+	@echo "⬆️  Upgrading development environment..."
+	@$(COMPOSE_DEV) build --no-cache
+	@$(COMPOSE_DEV) up -d
+	@echo "✅ Development environment upgraded!"
+
+rollback:
+	@echo "⏪ Rolling back to previous version..."
+	@git checkout app/requirements.txt
+	@$(COMPOSE) build --no-cache api
+	@$(COMPOSE) up -d
+	@echo "✅ Rollback complete!"

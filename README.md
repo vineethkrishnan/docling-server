@@ -169,6 +169,12 @@ make dev-down    # Stop dev environment
 make dev-test    # Test endpoints
 make dev-logs    # View logs
 
+# Upgrades
+make upgrade-check   # Check for updates
+make upgrade-docling # Upgrade Docling only
+make upgrade         # Upgrade all dependencies
+make rollback        # Rollback to previous version
+
 # Maintenance
 make ssl-renew   # Renew certificates
 make scale N=3   # Scale workers

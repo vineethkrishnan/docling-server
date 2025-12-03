@@ -361,7 +361,7 @@ worker:
 
 ## Updating & Maintenance
 
-### Update Application
+### Update Application Code
 
 ```bash
 # Pull latest changes
@@ -378,17 +378,64 @@ docker compose up -d --no-deps worker
 make restart
 ```
 
-### Update Dependencies
+### Upgrade Dependencies (Docling, FastAPI, etc.)
 
 ```bash
-# Update base images
-docker compose pull
+# Check for available updates
+make upgrade-check
 
-# Rebuild with fresh dependencies
-make build-clean
+# Output:
+# 📦 Current versions:
+#   docling>=2.14.0
+#   fastapi>=0.115.5
+#   celery[redis]>=5.4.0
+#
+# 📡 Latest versions on PyPI:
+#   docling: 2.15.0
+#   fastapi: 0.115.6
+#   celery: 5.4.1
+```
 
-# Restart services
+**Upgrade Docling only:**
+
+```bash
+make upgrade-docling
+```
+
+**Upgrade all dependencies:**
+
+```bash
+make upgrade
+```
+
+This will:
+1. Update `requirements.txt` with latest versions
+2. Pull latest Docker base images
+3. Rebuild all containers
+4. Restart services
+
+**Rollback if issues occur:**
+
+```bash
+make rollback
+```
+
+### Manual Dependency Update
+
+If you prefer manual control:
+
+```bash
+# 1. Edit requirements.txt
+nano app/requirements.txt
+
+# 2. Rebuild images
+make build
+
+# 3. Restart services
 make restart
+
+# 4. Verify
+make test-api
 ```
 
 ### View Logs

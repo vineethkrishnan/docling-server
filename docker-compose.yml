@@ -93,9 +93,6 @@ services:
   # Celery Worker for Document Processing
   # ===========================================
   worker:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
     image: docling-api:latest
     container_name: docling-worker
     restart: unless-stopped
@@ -116,6 +113,8 @@ services:
       - model-cache:/home/docling/.cache
       - easyocr-cache:/home/docling/.easyocr
     depends_on:
+      api:
+        condition: service_started
       redis:
         condition: service_healthy
     networks:
@@ -131,9 +130,6 @@ services:
   # Additional Worker (Scale as needed)
   # ===========================================
   worker-2:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
     image: docling-api:latest
     container_name: docling-worker-2
     restart: unless-stopped
@@ -156,6 +152,8 @@ services:
       - model-cache:/home/docling/.cache
       - easyocr-cache:/home/docling/.easyocr
     depends_on:
+      api:
+        condition: service_started
       redis:
         condition: service_healthy
     networks:
@@ -195,9 +193,6 @@ services:
   # Only accessible via localhost (not exposed to public)
   # ===========================================
   flower:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
     image: docling-api:latest
     container_name: docling-flower
     restart: unless-stopped
@@ -214,6 +209,8 @@ services:
     ports:
       - "127.0.0.1:5555:5555"  # Localhost only - not exposed to public
     depends_on:
+      api:
+        condition: service_started
       redis:
         condition: service_healthy
     networks:
