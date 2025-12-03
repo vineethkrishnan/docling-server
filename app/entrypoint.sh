@@ -24,14 +24,33 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Build Redis URL from environment variables
+get_redis_url() {
+    local host="${REDIS_HOST:-redis}"
+    local port="${REDIS_PORT:-6379}"
+    local password="${REDIS_PASSWORD:-}"
+    local db="${REDIS_DB:-0}"
+    
+    if [ -n "$password" ]; then
+        echo "redis://:${password}@${host}:${port}/${db}"
+    else
+        echo "redis://${host}:${port}/${db}"
+    fi
+}
+
 # Wait for Redis to be ready
 wait_for_redis() {
     log_info "Waiting for Redis to be ready..."
     local max_attempts=30
     local attempt=1
+    local redis_url=$(get_redis_url)
+    
+    # Mask password in logs
+    local redis_url_masked=$(echo "$redis_url" | sed 's/:.*@/:****@/')
+    log_info "Redis URL: $redis_url_masked"
     
     while [ $attempt -le $max_attempts ]; do
-        if python -c "import redis; r = redis.from_url('${REDIS_URL:-redis://redis:6379/0}'); r.ping()" 2>/dev/null; then
+        if python -c "import redis; r = redis.from_url('${redis_url}'); r.ping()" 2>/dev/null; then
             log_info "Redis is ready!"
             return 0
         fi

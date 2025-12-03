@@ -178,12 +178,14 @@ services:
       --maxmemory 512mb
       --maxmemory-policy volatile-lru
       ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     networks:
       - docling-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "sh", "-c", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
