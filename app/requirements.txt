@@ -1,0 +1,36 @@
+# Core Framework
+fastapi>=0.115.5
+uvicorn[standard]>=0.32.1
+python-multipart>=0.0.17
+pydantic>=2.10.3,<3.0.0
+pydantic-settings>=2.6.1
+
+# Docling - Document Processing
+docling>=2.14.0
+docling-core>=2.17.0
+easyocr>=1.7.0
+
+# Celery - Task Queue
+celery[redis]>=5.4.0
+redis>=5.2.0
+
+# Embeddings
+sentence-transformers>=3.3.0
+torch>=2.5.0
+
+# Storage & Utils
+boto3>=1.35.0
+aiofiles>=24.1.0
+python-magic>=0.4.27
+httpx>=0.28.0
+
+# Monitoring & Logging
+structlog>=24.4.0
+prometheus-client>=0.21.0
+
+# Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Flower for monitoring
+flower>=2.0.0

@@ -1,0 +1,242 @@
+# ============================================
+# Docling Production Docker Compose
+# Domain: docling.ayunis.de
+# ============================================
+
+services:
+  # ===========================================
+  # Nginx Reverse Proxy with SSL
+  # ===========================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: docling-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - api
+    networks:
+      - docling-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # Certbot for SSL Certificate Management
+  # ===========================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: docling-certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot:rw
+      - ./certbot/conf:/etc/letsencrypt:rw
+    depends_on:
+      - nginx
+    # Run certbot renew every 12 hours
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'"
+    networks:
+      - docling-network
+
+  # ===========================================
+  # Docling API Service
+  # ===========================================
+  api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: docling-api:latest
+    container_name: docling-api
+    restart: unless-stopped
+    command: api
+    environment:
+      - ENV=production
+      - PORT=8000
+      - WORKERS=2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - DOCLING_API_TOKEN=${DOCLING_API_TOKEN}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://docling.ayunis.de}
+    volumes:
+      - docling-temp:/tmp/docling_downloads
+      - docling-uploads:/tmp/docling_uploads
+      - model-cache:/home/docling/.cache
+      - easyocr-cache:/home/docling/.easyocr
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  # ===========================================
+  # Celery Worker for Document Processing
+  # ===========================================
+  worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: docling-api:latest
+    container_name: docling-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      - ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-2}
+      - CELERY_QUEUE=docling
+      - CELERY_LOGLEVEL=info
+      - PRELOAD_MODELS=true
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - docling-temp:/tmp/docling_downloads
+      - docling-uploads:/tmp/docling_uploads
+      - model-cache:/home/docling/.cache
+      - easyocr-cache:/home/docling/.easyocr
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  # ===========================================
+  # Additional Worker (Scale as needed)
+  # ===========================================
+  worker-2:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: docling-api:latest
+    container_name: docling-worker-2
+    restart: unless-stopped
+    command: worker
+    profiles:
+      - scale
+    environment:
+      - ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-2}
+      - CELERY_QUEUE=docling
+      - CELERY_LOGLEVEL=info
+      - PRELOAD_MODELS=true
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - docling-temp:/tmp/docling_downloads
+      - docling-uploads:/tmp/docling_uploads
+      - model-cache:/home/docling/.cache
+      - easyocr-cache:/home/docling/.easyocr
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  # ===========================================
+  # Redis - Task Queue & Cache
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: docling-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy volatile-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis-data:/data
+    networks:
+      - docling-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # Flower - Celery Monitoring (Optional)
+  # Only accessible via localhost (not exposed to public)
+  # ===========================================
+  flower:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: docling-api:latest
+    container_name: docling-flower
+    restart: unless-stopped
+    command: flower
+    profiles:
+      - monitoring
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - FLOWER_PORT=5555
+      - FLOWER_USER=${FLOWER_USER:-admin}
+      - FLOWER_PASSWORD=${FLOWER_PASSWORD:-admin}
+    ports:
+      - "127.0.0.1:5555:5555"  # Localhost only - not exposed to public
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-network
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  docling-network:
+    driver: bridge
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  redis-data:
+    driver: local
+  docling-temp:
+    driver: local
+  docling-uploads:
+    driver: local
+  model-cache:
+    driver: local
+  easyocr-cache:
+    driver: local

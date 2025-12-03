@@ -1,0 +1,159 @@
+# ============================================
+# Docling Development Docker Compose
+# Local development without SSL
+# ============================================
+
+services:
+  # ===========================================
+  # Nginx Reverse Proxy (No SSL)
+  # ===========================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: docling-nginx-dev
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    networks:
+      - docling-dev-network
+
+  # ===========================================
+  # Docling API Service (Development)
+  # ===========================================
+  api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.dev
+    image: docling-api:dev
+    container_name: docling-api-dev
+    restart: unless-stopped
+    command: api
+    environment:
+      - ENV=development
+      - PORT=8000
+      - WORKERS=1
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - DOCLING_API_TOKEN=${DOCLING_API_TOKEN:-dev-token-123}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - CORS_ORIGINS=http://localhost:8080,http://localhost:3000,http://127.0.0.1:8080
+    volumes:
+      # Mount source code for hot reload
+      - ./app:/app:cached
+      - docling-temp-dev:/tmp/docling_downloads
+      - docling-uploads-dev:/tmp/docling_uploads
+      - model-cache-dev:/root/.cache
+      - easyocr-cache-dev:/root/.easyocr
+    ports:
+      # Expose API directly for debugging
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-dev-network
+
+  # ===========================================
+  # Celery Worker for Document Processing
+  # ===========================================
+  worker:
+    image: docling-api:dev
+    container_name: docling-worker-dev
+    restart: unless-stopped
+    command: worker
+    environment:
+      - ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - CELERY_CONCURRENCY=1
+      - CELERY_QUEUE=docling
+      - CELERY_LOGLEVEL=debug
+      - PRELOAD_MODELS=${PRELOAD_MODELS:-false}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      # Mount source code for hot reload
+      - ./app:/app:cached
+      - docling-temp-dev:/tmp/docling_downloads
+      - docling-uploads-dev:/tmp/docling_uploads
+      - model-cache-dev:/root/.cache
+      - easyocr-cache-dev:/root/.easyocr
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-dev-network
+
+  # ===========================================
+  # Redis - Task Queue & Cache
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: docling-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+    ports:
+      # Expose Redis for debugging
+      - "6379:6379"
+    volumes:
+      - redis-data-dev:/data
+    networks:
+      - docling-dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ===========================================
+  # Flower - Celery Monitoring (Always on in dev)
+  # ===========================================
+  flower:
+    image: docling-api:dev
+    container_name: docling-flower-dev
+    restart: unless-stopped
+    command: flower
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - FLOWER_PORT=5555
+      - FLOWER_USER=admin
+      - FLOWER_PASSWORD=admin
+    ports:
+      - "5555:5555"
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - docling-dev-network
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  docling-dev-network:
+    driver: bridge
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  redis-data-dev:
+    driver: local
+  docling-temp-dev:
+    driver: local
+  docling-uploads-dev:
+    driver: local
+  model-cache-dev:
+    driver: local
+  easyocr-cache-dev:
+    driver: local
